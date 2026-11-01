@@ -192,6 +192,46 @@ public sealed class TriggerCronPreviewTest
         });
     }
 
+    /// <summary>
+    /// https://github.com/quartznet/quartznet/issues/4187
+    /// </summary>
+    [Test]
+    public async Task SavingAScheduleMakesTheNextFireTheOneThePreviewShows()
+    {
+        await Schedule(Cron("0 0 12 * * ?", TimeZoneInfo.Utc));
+        IRenderedComponent<TriggerDetail> page = Render();
+        page.Find("#trigger-cron-expression").Change("0 0 9 * * ?");
+        page.WaitForAssertion(() => FireTimes(page).Should().StartWith("2026-10-06 09:00:00 +00:00"));
+
+        page.FindAll("button").Single(button => button.TextContent.Trim() == "Save schedule").Click();
+
+        await page.WaitForAssertionAsync(async () =>
+        {
+            ICronTrigger stored = (ICronTrigger) (await scheduler.GetTrigger(NightlyTrigger))!;
+            stored.CronExpressionString.Should().Be("0 0 9 * * ?");
+            stored.GetNextFireTimeUtc().Should().Be(new DateTimeOffset(2026, 10, 6, 9, 0, 0, TimeSpan.Zero),
+                "the first match after the trigger's August start is in the past, and the scheduler would take it for a misfire");
+        });
+    }
+
+    [Test]
+    public async Task SavingAScheduleKeepsAStartTimeThatIsStillAhead()
+    {
+        await Schedule(Cron("0 0 12 * * ?", TimeZoneInfo.Utc, startAt: new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero)));
+        IRenderedComponent<TriggerDetail> page = Render();
+        page.Find("#trigger-cron-expression").Change("0 0 9 * * ?");
+
+        page.FindAll("button").Single(button => button.TextContent.Trim() == "Save schedule").Click();
+
+        await page.WaitForAssertionAsync(async () =>
+        {
+            ICronTrigger stored = (ICronTrigger) (await scheduler.GetTrigger(NightlyTrigger))!;
+            stored.CronExpressionString.Should().Be("0 0 9 * * ?");
+            stored.StartTimeUtc.Should().Be(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero));
+            stored.GetNextFireTimeUtc().Should().Be(new DateTimeOffset(2026, 11, 1, 9, 0, 0, TimeSpan.Zero));
+        });
+    }
+
     [Test]
     public async Task ATriggerThatHasEndedHasNoUpcomingFires()
     {

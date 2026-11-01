@@ -162,7 +162,7 @@
             return;
         }
 
-        if (Trigger is not JsonElement trigger || !TriggerPayloadBuilder.TryWithCronExpression(trigger, expression, out JsonElement payload))
+        if (Trigger is not JsonElement trigger || !TriggerPayloadBuilder.TryWithCronExpression(trigger, expression, _now, out JsonElement payload))
         {
             _unsupported = true;
             return;
@@ -191,12 +191,6 @@
         if (operable.EndTimeUtc < _now)
         {
             return;
-        }
-
-        // A trigger whose start has passed fires next after now, not at the first fire after its start.
-        if (operable.StartTimeUtc < _now)
-        {
-            operable.StartTimeUtc = _now;
         }
 
         operable.SetNextFireTimeUtc(null);

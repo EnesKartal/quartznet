@@ -38,13 +38,15 @@ internal static class TriggerPayloadBuilder
     private const string TriggerTypeProperty = "triggerType";
     private const string CronExpressionProperty = "cronExpressionString";
     private const string NextFireTimeProperty = "nextFireTimeUtc";
+    private const string StartTimeProperty = "startTimeUtc";
+    private const string EndTimeProperty = "endTimeUtc";
 
     /// <summary>
     /// Produces <paramref name="trigger"/> with its cron expression replaced by
     /// <paramref name="cronExpression"/>, or <see langword="false"/> when the trigger cannot be sent
-    /// back to the scheduler at all.
+    /// back to the scheduler at all. A start time that has passed moves up to <paramref name="now"/>.
     /// </summary>
-    public static bool TryWithCronExpression(JsonElement trigger, string cronExpression, out JsonElement payload)
+    public static bool TryWithCronExpression(JsonElement trigger, string cronExpression, DateTimeOffset now, out JsonElement payload)
     {
         if (trigger.ValueKind != JsonValueKind.Object || !HasProperty(trigger, TriggerTypeProperty))
         {
@@ -75,6 +77,13 @@ internal static class TriggerPayloadBuilder
                     // lets the first fire be computed from the expression the user just entered.
                     writer.WriteNull(property.Name);
                 }
+                else if (Matches(property.Name, StartTimeProperty) && IsBefore(property.Value, now) && !HasEnded(trigger, now))
+                {
+                    // RescheduleJob computes the first fire from the start time, so one that has passed
+                    // gives a next fire time in the past, which the scheduler then takes for a misfire
+                    // (#4187). An ended trigger keeps its start, which cannot be later than its end.
+                    writer.WriteString(property.Name, now);
+                }
                 else
                 {
                     property.WriteTo(writer);
@@ -92,6 +101,24 @@ internal static class TriggerPayloadBuilder
         using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory);
         payload = document.RootElement.Clone();
         return true;
+    }
+
+    private static bool HasEnded(JsonElement trigger, DateTimeOffset now)
+    {
+        foreach (JsonProperty property in trigger.EnumerateObject())
+        {
+            if (Matches(property.Name, EndTimeProperty))
+            {
+                return IsBefore(property.Value, now);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsBefore(JsonElement time, DateTimeOffset now)
+    {
+        return time.ValueKind == JsonValueKind.String && time.TryGetDateTimeOffset(out DateTimeOffset value) && value < now;
     }
 
     private static bool HasProperty(JsonElement element, string name)
